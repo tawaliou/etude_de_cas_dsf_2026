@@ -129,7 +129,9 @@ def submit_sms(
                     details={"used": used, "quota": app.daily_quota, "requested": segments},
                 )
 
-            scheduled = send_at is not None and send_at > now
+            requested_at = send_at if send_at is not None and send_at > now else now
+            send_time = domain.earliest_send_time(category, requested_at)
+            deferred = send_time > now  # scheduled by the app and/or outside the INFO window
             sms = Sms.objects.create(
                 app_code=app.code,
                 reference=reference,
@@ -139,11 +141,13 @@ def submit_sms(
                 text=text,
                 content_hash=fingerprint,
                 segments=segments,
-                status=SmsStatus.PROGRAMME if scheduled else SmsStatus.EN_ATTENTE,
-                scheduled_at=send_at if scheduled else None,
-                next_attempt_at=send_at if scheduled else None,
+                status=SmsStatus.PROGRAMME if deferred else SmsStatus.EN_ATTENTE,
+                scheduled_at=send_at if requested_at != now else None,
+                next_attempt_at=send_time if deferred else None,
                 quota_day=today,
             )
+            if send_time != requested_at:
+                record_event(sms.pk, SmsEvent.Kind.DIFFERE, _deferral_detail(send_time))
     except IntegrityError:
         # Same reference inserted concurrently: behave as an idempotent replay.
         existing = Sms.objects.get(app_code=app.code, reference=reference)
@@ -154,6 +158,24 @@ def submit_sms(
         sms.id, app.code, reference, category, operator, segments, sms.status,
     )  # never log the text (OTP confidentiality)
     return sms, True
+
+
+def _deferral_detail(send_time: datetime) -> str:
+    return (
+        "Message INFO hors plage horaire (7 h - 21 h, heure du Bénin) : envoi différé au "
+        f"{send_time.astimezone(domain.BENIN_TZ):%d/%m/%Y à %H:%M}."
+    )
+
+
+def defer_outside_window(sms: Sms, send_time: datetime) -> bool:
+    """Postpone a waiting SMS to `send_time` (used by the worker for INFO outside the window)."""
+    updated = Sms.objects.filter(
+        pk=sms.pk, status__in=[SmsStatus.EN_ATTENTE, SmsStatus.PROGRAMME]
+    ).update(next_attempt_at=send_time, updated_at=clock.now())
+    if updated:
+        record_event(sms.pk, SmsEvent.Kind.DIFFERE, _deferral_detail(send_time))
+        logger.info("sms deferred id=%s until=%s", sms.pk, send_time.isoformat())
+    return bool(updated)
 
 
 def _replay(existing: Sms, fingerprint: str) -> Sms:

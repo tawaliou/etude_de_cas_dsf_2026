@@ -6,10 +6,10 @@ from datetime import timedelta
 from django.conf import settings
 from django.db.models import Case, IntegerField, Q, Value, When
 
-from . import clock
+from . import clock, domain
 from .models import Category, Sms, SmsEvent, SmsStatus
 from .operators import OutgoingSms, SendResult, get_operator_client
-from .services import record_event, transition
+from .services import defer_outside_window, record_event, transition
 
 logger = logging.getLogger("gateway.dispatch")
 
@@ -42,6 +42,14 @@ def dispatch_due(limit: int = 50) -> int:
 
 
 def dispatch_one(sms: Sms) -> bool:
+    # INFO may only leave inside the 07:00-21:00 window (a retry or a backlog can
+    # cross 21:00): postpone it to the next opening instead of transmitting.
+    now = clock.now()
+    send_time = domain.earliest_send_time(sms.category, now)
+    if send_time > now:
+        defer_outside_window(sms, send_time)
+        return False
+
     attempt = sms.attempts + 1
     # Claim the SMS (compare-and-set): if it was cancelled or taken meanwhile, skip it.
     claimed = transition(

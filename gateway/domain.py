@@ -4,11 +4,16 @@ import hashlib
 import json
 import math
 import re
-from datetime import datetime
+from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 ASCII_SEGMENT_SIZE = 160
 UNICODE_SEGMENT_SIZE = 70
 MAX_SEGMENTS = 6
+
+BENIN_TZ = ZoneInfo("Africa/Porto-Novo")
+INFO_WINDOW_START = time(7, 0)  # INFO SMS leave only between 07:00 (included)
+INFO_WINDOW_END = time(21, 0)  # and 21:00 (excluded), Benin time
 
 PHONE_NUMBER_RE = re.compile(r"^01\d{8}$")
 
@@ -70,3 +75,18 @@ def content_hash(*, to: str, text: str, category: str, send_at: datetime | None)
         sort_keys=True,
     )
     return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def earliest_send_time(category: str, instant: datetime) -> datetime:
+    """First instant >= `instant` at which an SMS of this category may leave.
+
+    OTP: immediately. INFO: inside the 07:00-21:00 Benin window, otherwise
+    deferred to the next 07:00.
+    """
+    if category != "INFO":
+        return instant
+    local = instant.astimezone(BENIN_TZ)
+    if INFO_WINDOW_START <= local.time() < INFO_WINDOW_END:
+        return instant
+    day = local.date() if local.time() < INFO_WINDOW_START else local.date() + timedelta(days=1)
+    return datetime.combine(day, INFO_WINDOW_START, tzinfo=BENIN_TZ)

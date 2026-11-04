@@ -99,6 +99,7 @@ class SmsEvent(models.Model):
 
     class Kind(models.TextChoices):
         TRANSMISSION = "TRANSMISSION", "Transmis à l'opérateur"
+        DIFFERE = "DIFFERE", "Envoi différé (plage horaire des INFO)"
         OPERATEUR_INDISPONIBLE = "OPERATEUR_INDISPONIBLE", "Opérateur indisponible"
         NOUVELLE_TENTATIVE = "NOUVELLE_TENTATIVE", "Nouvelle tentative programmée"
         ECHEC = "ECHEC", "SMS échoué"

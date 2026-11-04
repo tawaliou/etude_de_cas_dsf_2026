@@ -7,12 +7,11 @@ It lets the jury test the INFO time window without waiting for the night.
 
 from datetime import date, datetime
 from functools import lru_cache
-from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.utils import timezone
 
-BENIN_TZ = ZoneInfo("Africa/Porto-Novo")
+from .domain import BENIN_TZ
 
 
 @lru_cache(maxsize=None)
