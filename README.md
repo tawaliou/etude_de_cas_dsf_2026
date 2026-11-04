@@ -39,7 +39,7 @@
 ## 1. Démarrage
 
 ```bash
-git clone <url-du-dépôt> && cd <dossier>
+git clone https://github.com/tawaliou/etude_de_cas_dsf_2026.git && cd etude_de_cas_dsf_2026
 python3 -m venv .venv
 source .venv/bin/activate            # Windows : .venv\Scripts\activate
 pip install -r requirements.txt
