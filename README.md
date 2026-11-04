@@ -75,7 +75,7 @@ Ouvrir **http://127.0.0.1:8000/api/docs** (Swagger) :
 2. sur un endpoint : **Try it out** puis **Execute**.
 
 > Sans worker, les SMS sont acceptés mais restent `EN_ATTENTE` : c'est le worker qui les transmet.
-> Le simulateur renvoie ses comptes rendus à `http://127.0.0.1:8000`. Si l'API tourne sur un autre port, définir `GATEWAY_BASE_URL` (voir [Configuration](#8-configuration)) pour le worker.
+> Le simulateur renvoie ses comptes rendus à `http://127.0.0.1:8000`. Si l'API tourne sur un autre port, donner ce port aux autres commandes avec la variable `PORT` (ex. `PORT=8001 python manage.py worker`, `PORT=8001 python manage.py send_report …`). `./run.sh` le fait tout seul.
 
 ---
 
@@ -236,7 +236,7 @@ Exemple d'historique pour `0197000001` :
 
 ### Envoyer un compte rendu à la main
 
-La commande `send_report` envoie à l'API (qui doit tourner) un compte rendu signé pour un SMS déjà transmis, par exemple un SMS au numéro finissant par `7` resté `TRANSMIS` :
+La commande `send_report` envoie à l'API (qui doit tourner) un compte rendu signé pour un SMS déjà transmis, par exemple un SMS au numéro finissant par `7` resté `TRANSMIS`. À lancer dans un second terminal, depuis le dossier du projet, venv activé (`source .venv/bin/activate`) ; si l'API tourne sur un autre port que 8000, préfixer par `PORT=…` :
 
 ```bash
 python manage.py send_report <sms_id> DELIVRE --bad-signature   # signature fausse  → 401, rien ne change
@@ -349,7 +349,8 @@ Variables d'environnement (toutes facultatives) :
 |---|---|---|
 | `ETATCIVIL_API_KEY`, `COURRIER_API_KEY` | `etatcivil-test-key`, `courrier-test-key` | Clés d'API des applications. |
 | `CELTIIS_SECRET`, `MTN_SECRET`, `MOOV_SECRET` | `celtiis-secret`, `mtn-secret`, `moov-secret` | Secrets de signature des comptes rendus. |
-| `GATEWAY_BASE_URL` | `http://127.0.0.1:8000` | URL de l'API, utilisée par le simulateur pour renvoyer ses comptes rendus. |
+| `PORT` | `8000` | Port de l'API pour `run.sh` ; sert aussi à construire `GATEWAY_BASE_URL` par défaut. |
+| `GATEWAY_BASE_URL` | `http://127.0.0.1:$PORT` | URL de l'API, utilisée par le simulateur et `send_report` pour envoyer les comptes rendus. |
 | `GATEWAY_FAKE_NOW` | (vide) | Heure simulée de départ, heure du Bénin (ex. `2026-11-04T23:30`). |
 | `RETRY_DELAYS_SECONDS` | `2,4,8` | Délais avant les nouvelles tentatives 1, 2, 3. |
 | `SIMULATOR_REPORT_DELAY_SECONDS` | `1` | Délai entre transmission et compte rendu simulé. |

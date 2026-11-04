@@ -79,7 +79,8 @@ OPERATOR_SECRETS = {
 }
 
 # Public URL of the gateway, used by the operator simulator to send reports back.
-GATEWAY_BASE_URL = os.environ.get("GATEWAY_BASE_URL", "http://127.0.0.1:8000")
+# Defaults to the local API on $PORT (8000), the port run.sh starts it on.
+GATEWAY_BASE_URL = os.environ.get("GATEWAY_BASE_URL", f"http://127.0.0.1:{os.environ.get('PORT', '8000')}")
 
 # Operator client used by the worker (the simulator, in this exercise).
 OPERATOR_CLIENT = os.environ.get("OPERATOR_CLIENT", "gateway.simulator.SimulatedOperator")
