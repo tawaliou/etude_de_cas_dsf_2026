@@ -59,6 +59,11 @@ class Sms(models.Model):
     scheduled_at = models.DateTimeField(null=True, blank=True)
     # Benin calendar day the segments are charged to (day of submission).
     quota_day = models.DateField()
+    # Transmission: number of attempts made, when the next one is due (scheduled
+    # send or retry), and the id the operator gave to the current attempt.
+    attempts = models.PositiveSmallIntegerField(default=0)
+    next_attempt_at = models.DateTimeField(null=True, blank=True)
+    operator_message_id = models.CharField(max_length=64, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -67,7 +72,11 @@ class Sms(models.Model):
         constraints = [
             models.UniqueConstraint(fields=["app_code", "reference"], name="uniq_sms_reference_per_app"),
         ]
-        indexes = [models.Index(fields=["app_code", "quota_day"])]
+        indexes = [
+            models.Index(fields=["app_code", "quota_day"]),
+            models.Index(fields=["status", "next_attempt_at"]),
+            models.Index(fields=["operator", "operator_message_id"]),
+        ]
 
     def __str__(self):
         # Never include the text: an OTP must not leak through logs or reprs.
@@ -80,3 +89,31 @@ class Sms(models.Model):
     @property
     def is_final(self) -> bool:
         return self.status in FINAL_STATUSES
+
+
+class SmsEvent(models.Model):
+    """History of an SMS: transmissions, operator answers, reports, retries.
+
+    Details never contain the SMS text.
+    """
+
+    class Kind(models.TextChoices):
+        TRANSMISSION = "TRANSMISSION", "Transmis à l'opérateur"
+        OPERATEUR_INDISPONIBLE = "OPERATEUR_INDISPONIBLE", "Opérateur indisponible"
+        NOUVELLE_TENTATIVE = "NOUVELLE_TENTATIVE", "Nouvelle tentative programmée"
+        ECHEC = "ECHEC", "SMS échoué"
+        COMPTE_RENDU = "COMPTE_RENDU", "Compte rendu pris en compte"
+        COMPTE_RENDU_IGNORE = "COMPTE_RENDU_IGNORE", "Compte rendu ignoré"
+        COMPTE_RENDU_REJETE = "COMPTE_RENDU_REJETE", "Compte rendu rejeté (signature invalide)"
+        ANNULATION = "ANNULATION", "SMS annulé"
+
+    sms = models.ForeignKey(Sms, on_delete=models.CASCADE, related_name="events")
+    kind = models.CharField(max_length=32, choices=Kind.choices)
+    detail = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+
+    def __str__(self):
+        return f"{self.kind} {self.detail}"

@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from gateway.models import Category, Sms, SmsStatus
+from gateway.models import Category, Sms, SmsEvent, SmsStatus
 
 
 class SmsFilterSerializer(serializers.Serializer):
@@ -41,7 +41,38 @@ class SmsSerializer(serializers.ModelSerializer):
             "segments",
             "status",
             "scheduled_at",
+            "attempts",
+            "next_attempt_at",
             "created_at",
             "updated_at",
         ]
         read_only_fields = fields
+
+
+class SmsEventSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SmsEvent
+        fields = ["kind", "detail", "created_at"]
+
+
+class SmsDetailSerializer(SmsSerializer):
+    history = SmsEventSerializer(source="events", many=True, read_only=True)
+
+    class Meta(SmsSerializer.Meta):
+        fields = [*SmsSerializer.Meta.fields, "operator_message_id", "history"]
+        read_only_fields = fields
+
+
+class OperatorReportSerializer(serializers.Serializer):
+    """Documentation only: the raw body is what gets signed and verified."""
+
+    message_id = serializers.CharField(help_text="Identifiant donné par l'opérateur à la transmission.")
+    status = serializers.ChoiceField(choices=["DELIVRE", "ECHEC_TEMPORAIRE", "ECHEC_DEFINITIF"])
+    timestamp = serializers.DateTimeField(required=False)
+
+
+class ReportOutcomeSerializer(serializers.Serializer):
+    applied = serializers.BooleanField(help_text="False si le compte rendu a été ignoré (statut déjà définitif).")
+    sms_id = serializers.CharField()
+    sms_status = serializers.CharField()
+    detail = serializers.CharField()

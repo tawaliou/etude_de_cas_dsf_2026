@@ -1,6 +1,7 @@
 """Django settings for the shared SMS gateway."""
 
 import os
+import sys
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -80,6 +81,18 @@ OPERATOR_SECRETS = {
 # Public URL of the gateway, used by the operator simulator to send reports back.
 GATEWAY_BASE_URL = os.environ.get("GATEWAY_BASE_URL", "http://127.0.0.1:8000")
 
+# Operator client used by the worker (the simulator, in this exercise).
+OPERATOR_CLIENT = os.environ.get("OPERATOR_CLIENT", "gateway.simulator.SimulatedOperator")
+
+# Delays (seconds) before retries 1, 2 and 3 after a temporary failure. Short for the demo.
+RETRY_DELAYS_SECONDS = [int(s) for s in os.environ.get("RETRY_DELAYS_SECONDS", "2,4,8").split(",")]
+
+# Simulator: seconds between the transmission and the delivery report(s).
+SIMULATOR_REPORT_DELAY_SECONDS = float(os.environ.get("SIMULATOR_REPORT_DELAY_SECONDS", "1"))
+
+# Worker: seconds between two polls of the due SMS.
+WORKER_INTERVAL_SECONDS = float(os.environ.get("WORKER_INTERVAL_SECONDS", "1"))
+
 # Optional fake "now" (Benin local time, ISO format) to test the INFO time window.
 GATEWAY_FAKE_NOW = os.environ.get("GATEWAY_FAKE_NOW", "")
 
@@ -104,6 +117,10 @@ SPECTACULAR_SETTINGS = {
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
     "COMPONENT_SPLIT_REQUEST": True,
+    "ENUM_NAME_OVERRIDES": {
+        "SmsStatusEnum": "gateway.models.SmsStatus",
+        "ReportStatusEnum": "gateway.operators.REPORT_STATUSES",
+    },
 }
 
 LOGGING = {
@@ -111,5 +128,8 @@ LOGGING = {
     "disable_existing_loggers": False,
     "formatters": {"simple": {"format": "%(asctime)s %(levelname)s %(name)s %(message)s"}},
     "handlers": {"console": {"class": "logging.StreamHandler", "formatter": "simple"}},
-    "loggers": {"gateway": {"handlers": ["console"], "level": "INFO"}},
+    "loggers": {
+        # Quiet during the test suite (tests capture logs explicitly with assertLogs).
+        "gateway": {"handlers": ["console"], "level": "CRITICAL" if "test" in sys.argv[1:2] else "INFO"},
+    },
 }

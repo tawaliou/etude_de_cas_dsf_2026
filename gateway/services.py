@@ -10,7 +10,7 @@ from django.db.models import Sum
 from . import clock, domain
 from .api.exceptions import Conflict, InvalidInput, NotFound, QuotaExceeded
 from .auth import ClientApp
-from .models import CANCELLABLE_STATUSES, Sms, SmsStatus, sources_of
+from .models import CANCELLABLE_STATUSES, Sms, SmsEvent, SmsStatus, sources_of
 
 logger = logging.getLogger("gateway")
 
@@ -31,6 +31,10 @@ def transition(sms_id, target: str, *, allowed_from: set[str] | None = None, **f
         status=target, updated_at=clock.now(), **fields
     )
     return updated == 1
+
+
+def record_event(sms_id, kind: str, detail: str = "") -> None:
+    SmsEvent.objects.create(sms_id=sms_id, kind=kind, detail=detail[:255])
 
 
 # ---------------------------------------------------------------------------
@@ -72,6 +76,7 @@ def cancel_sms(app: ClientApp, sms_id) -> Sms:
             code="not_cancellable",
             details={"status": sms.status},
         )
+    record_event(sms.pk, SmsEvent.Kind.ANNULATION, "Annulé par l'application.")
     sms.refresh_from_db()
     logger.info("sms cancelled id=%s app=%s ref=%s", sms.id, app.code, sms.reference)
     return sms
@@ -136,6 +141,7 @@ def submit_sms(
                 segments=segments,
                 status=SmsStatus.PROGRAMME if scheduled else SmsStatus.EN_ATTENTE,
                 scheduled_at=send_at if scheduled else None,
+                next_attempt_at=send_at if scheduled else None,
                 quota_day=today,
             )
     except IntegrityError:

@@ -31,7 +31,9 @@ class ConsultSmsTests(TestCase):
         sms = self.submit(self.etatcivil)
         response = self.etatcivil.get(f"/api/sms/{sms['id']}")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), sms)
+        body = response.json()
+        self.assertEqual({key: body[key] for key in sms}, sms)
+        self.assertEqual(body["history"], [])
 
     def test_other_app_sms_is_not_found(self, _now):
         sms = self.submit(self.etatcivil)

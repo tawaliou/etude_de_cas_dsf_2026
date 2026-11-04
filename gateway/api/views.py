@@ -1,13 +1,25 @@
+from dataclasses import asdict
+
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema, inline_serializer
 from rest_framework import serializers, status
 from rest_framework.pagination import PageNumberPagination
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from gateway import services
+from gateway import reports, services
 from gateway.models import Sms
+from gateway.operators import SIGNATURE_HEADER
 
-from .serializers import SmsCreateSerializer, SmsFilterSerializer, SmsSerializer, UsageSerializer
+from .serializers import (
+    OperatorReportSerializer,
+    ReportOutcomeSerializer,
+    SmsCreateSerializer,
+    SmsDetailSerializer,
+    SmsFilterSerializer,
+    SmsSerializer,
+    UsageSerializer,
+)
 
 NOT_FOUND = OpenApiResponse(description="SMS introuvable (ou appartenant à une autre application).")
 UNAUTHORIZED = OpenApiResponse(description="Clé d'API absente ou invalide.")
@@ -93,10 +105,11 @@ class SmsDetailView(APIView):
     @extend_schema(
         tags=["SMS"],
         summary="Consulter un SMS",
-        responses={200: SmsSerializer, 401: UNAUTHORIZED, 404: NOT_FOUND},
+        description="Statut, tentatives et historique (transmissions, comptes rendus reçus, ignorés ou rejetés).",
+        responses={200: SmsDetailSerializer, 401: UNAUTHORIZED, 404: NOT_FOUND},
     )
     def get(self, request, sms_id):
-        return Response(SmsSerializer(services.get_app_sms(request.user, sms_id)).data)
+        return Response(SmsDetailSerializer(services.get_app_sms(request.user, sms_id)).data)
 
 
 class SmsCancelView(APIView):
@@ -115,3 +128,32 @@ class SmsCancelView(APIView):
     )
     def post(self, request, sms_id):
         return Response(SmsSerializer(services.cancel_sms(request.user, sms_id)).data)
+
+
+class OperatorReportView(APIView):
+    """Callback used by operators. Authenticated by the HMAC signature, not by an API key."""
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        tags=["Opérateurs"],
+        summary="Compte rendu de livraison (callback opérateur)",
+        description=(
+            f"Corps JSON signé : en-tête `{SIGNATURE_HEADER}` = HMAC-SHA256 hexadécimal du corps brut avec le "
+            "secret de l'opérateur. Signature invalide : 401, rien n'est modifié. Un compte rendu sur un SMS "
+            "au statut définitif est ignoré (200, `applied: false`)."
+        ),
+        auth=[],
+        request=OperatorReportSerializer,
+        parameters=[OpenApiParameter(SIGNATURE_HEADER, str, OpenApiParameter.HEADER, required=True)],
+        responses={
+            200: ReportOutcomeSerializer,
+            400: OpenApiResponse(description="Corps invalide."),
+            401: OpenApiResponse(description="Signature invalide."),
+            404: OpenApiResponse(description="Opérateur ou message inconnu."),
+        },
+    )
+    def post(self, request, operator):
+        outcome = reports.handle_report(operator.upper(), request.body, request.headers.get(SIGNATURE_HEADER))
+        return Response(asdict(outcome))

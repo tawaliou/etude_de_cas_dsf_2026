@@ -27,6 +27,12 @@ class InvalidInput(GatewayError):
     default_detail = "Données invalides."
 
 
+class InvalidSignature(GatewayError):
+    status_code = status.HTTP_401_UNAUTHORIZED
+    default_code = "invalid_signature"
+    default_detail = "Signature invalide."
+
+
 class NotFound(GatewayError):
     status_code = status.HTTP_404_NOT_FOUND
     default_code = "not_found"
