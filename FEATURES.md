@@ -11,7 +11,7 @@
 
 ## Rendu
 
-- [ ] README : démarrage, API, clés de test, scénarios du simulateur, test hors plage horaire
+- [x] README : démarrage, API, clés de test, scénarios du simulateur, test hors plage horaire
 
 ## Bonus (si le temps le permet)
 
@@ -19,4 +19,4 @@
 - [ ] Rappel signé vers l'application cliente
 - [ ] SMS dont le compte rendu n'arrive jamais
 - [ ] Tableau de supervision
-- [ ] Tests automatisés des cas critiques
+- [x] Tests automatisés des cas critiques
