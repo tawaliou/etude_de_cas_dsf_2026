@@ -8,15 +8,31 @@
 
 ## Sommaire
 
-1. [Démarrage](#1-démarrage)
-2. [Clés d'API de test](#2-clés-dapi-de-test)
-3. [Description de l'API](#3-description-de-lapi)
-4. [Simulateur d'opérateurs : obtenir chaque cas](#4-simulateur-dopérateurs--obtenir-chaque-cas)
-5. [Tester la plage horaire sans attendre la nuit](#5-tester-la-plage-horaire-sans-attendre-la-nuit)
-6. [Conception](#6-conception)
-7. [Tests automatisés](#7-tests-automatisés)
-8. [Configuration](#8-configuration)
-9. [État d'avancement](#9-état-davancement)
+- [Passerelle commune d'envoi de SMS](#passerelle-commune-denvoi-de-sms)
+	- [Sommaire](#sommaire)
+	- [1. Démarrage](#1-démarrage)
+	- [2. Clés d'API de test](#2-clés-dapi-de-test)
+	- [3. Description de l'API](#3-description-de-lapi)
+		- [Authentification](#authentification)
+		- [Endpoints](#endpoints)
+		- [Soumettre un SMS](#soumettre-un-sms)
+		- [Soumettre une campagne](#soumettre-une-campagne)
+		- [Erreurs](#erreurs)
+		- [Cycle de vie d'un SMS](#cycle-de-vie-dun-sms)
+	- [4. Simulateur d'opérateurs : obtenir chaque cas](#4-simulateur-dopérateurs--obtenir-chaque-cas)
+		- [Envoyer un compte rendu à la main](#envoyer-un-compte-rendu-à-la-main)
+	- [5. Tester la plage horaire sans attendre la nuit](#5-tester-la-plage-horaire-sans-attendre-la-nuit)
+	- [6. Conception](#6-conception)
+		- [Organisation du code](#organisation-du-code)
+		- [Modèle de données](#modèle-de-données)
+		- [Réponse aux incidents du premier prototype](#réponse-aux-incidents-du-premier-prototype)
+		- [Choix et hypothèses](#choix-et-hypothèses)
+	- [7. Tests automatisés](#7-tests-automatisés)
+	- [8. Configuration](#8-configuration)
+	- [9. État d'avancement](#9-état-davancement)
+		- [Ce qui fonctionne (socle obligatoire complet)](#ce-qui-fonctionne-socle-obligatoire-complet)
+		- [Bonus](#bonus)
+		- [Limites connues](#limites-connues)
 
 ---
 
@@ -352,4 +368,4 @@ Variables d'environnement (toutes facultatives) :
 
 - **Comptes rendus du simulateur** : ils sont programmés par des minuteurs dans le processus du worker. Si le worker est arrêté juste après une transmission, le compte rendu de ce SMS est perdu et le SMS reste `TRANSMIS` (c'est précisément le cas « compte rendu jamais reçu » du bonus).
 - **SQLite** convient à l'épreuve et à un seul worker ; en production on passerait à PostgreSQL (`SELECT … FOR UPDATE SKIP LOCKED` pour plusieurs workers) et à des délais de nouvelle tentative en minutes.
-- **Le texte des OTP est stocké en clair en base** (il faut bien le transmettre à l'opérateur) ; il n'apparaît ni dans les journaux ni dans les réponses. En production : chiffrement au repos et purge après envoi.
+- **Le texte des OTP est stocké en clair en base** (il faut bien le transmettre à l'opérateur) ; il n'apparaît ni dans les journaux ni dans les réponses. En production : chiffrement sera fait.
