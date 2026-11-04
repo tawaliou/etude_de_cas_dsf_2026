@@ -1,6 +1,19 @@
 from rest_framework import serializers
 
-from gateway.models import Category, Sms
+from gateway.models import Category, Sms, SmsStatus
+
+
+class SmsFilterSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=SmsStatus.choices, required=False)
+    category = serializers.ChoiceField(choices=Category.choices, required=False)
+    reference = serializers.CharField(required=False)
+
+
+class UsageSerializer(serializers.Serializer):
+    date = serializers.DateField(help_text="Jour courant, heure du Bénin.")
+    quota = serializers.IntegerField(help_text="Quota journalier en segments.")
+    used = serializers.IntegerField(help_text="Segments consommés (SMS annulés exclus).")
+    remaining = serializers.IntegerField()
 
 
 class SmsCreateSerializer(serializers.Serializer):

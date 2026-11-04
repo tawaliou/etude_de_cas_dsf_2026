@@ -1,17 +1,80 @@
 """Use cases of the gateway. Each public function runs in a single transaction."""
 
 import logging
+import uuid
 from datetime import date, datetime
 
 from django.db import IntegrityError, transaction
 from django.db.models import Sum
 
 from . import clock, domain
-from .api.exceptions import Conflict, InvalidInput, QuotaExceeded
+from .api.exceptions import Conflict, InvalidInput, NotFound, QuotaExceeded
 from .auth import ClientApp
-from .models import Sms, SmsStatus
+from .models import CANCELLABLE_STATUSES, Sms, SmsStatus, sources_of
 
 logger = logging.getLogger("gateway")
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle
+# ---------------------------------------------------------------------------
+
+
+def transition(sms_id, target: str, *, allowed_from: set[str] | None = None, **fields) -> bool:
+    """Move an SMS to `target` only if its current status allows it.
+
+    Conditional UPDATE (compare-and-set): safe against concurrent workers, reports
+    and cancellations. Returns False when the SMS was not in an allowed status.
+    """
+    sources = sources_of(target) if allowed_from is None else allowed_from & sources_of(target)
+    updated = Sms.objects.filter(pk=sms_id, status__in=sources).update(
+        status=target, updated_at=clock.now(), **fields
+    )
+    return updated == 1
+
+
+# ---------------------------------------------------------------------------
+# Read side
+# ---------------------------------------------------------------------------
+
+
+def get_app_sms(app: ClientApp, sms_id) -> Sms:
+    """An SMS of the calling app. Other apps' SMS are reported as not found."""
+    try:
+        sms_id = uuid.UUID(str(sms_id))
+    except ValueError:
+        raise NotFound("SMS introuvable.", code="sms_not_found") from None
+    sms = Sms.objects.filter(app_code=app.code, pk=sms_id).first()
+    if sms is None:
+        raise NotFound("SMS introuvable.", code="sms_not_found")
+    return sms
+
+
+def daily_usage(app: ClientApp) -> dict:
+    today = clock.local_date()
+    used = used_segments(app.code, today)
+    return {
+        "date": today,
+        "quota": app.daily_quota,
+        "used": used,
+        "remaining": max(app.daily_quota - used, 0),
+    }
+
+
+def cancel_sms(app: ClientApp, sms_id) -> Sms:
+    """Cancel an SMS not yet transmitted. Its segments go back to the quota."""
+    sms = get_app_sms(app, sms_id)
+    if not transition(sms.pk, SmsStatus.ANNULE, allowed_from=CANCELLABLE_STATUSES):
+        sms.refresh_from_db()
+        raise Conflict(
+            f"Annulation impossible : le SMS est au statut {sms.status}. "
+            "Seul un SMS en attente ou programmé peut être annulé.",
+            code="not_cancellable",
+            details={"status": sms.status},
+        )
+    sms.refresh_from_db()
+    logger.info("sms cancelled id=%s app=%s ref=%s", sms.id, app.code, sms.reference)
+    return sms
 
 
 def used_segments(app_code: str, day: date) -> int:

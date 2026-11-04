@@ -27,6 +27,23 @@ class SmsStatus(models.TextChoices):
 
 FINAL_STATUSES = {SmsStatus.DELIVRE, SmsStatus.ECHOUE, SmsStatus.ANNULE}
 
+# Lifecycle: which statuses each status may move to. Final statuses have no exit.
+ALLOWED_TRANSITIONS = {
+    SmsStatus.EN_ATTENTE: {SmsStatus.TRANSMIS, SmsStatus.ECHOUE, SmsStatus.ANNULE},
+    SmsStatus.PROGRAMME: {SmsStatus.EN_ATTENTE, SmsStatus.TRANSMIS, SmsStatus.ECHOUE, SmsStatus.ANNULE},
+    SmsStatus.TRANSMIS: {SmsStatus.DELIVRE, SmsStatus.ECHOUE, SmsStatus.EN_ATTENTE},  # EN_ATTENTE = retry
+    SmsStatus.DELIVRE: set(),
+    SmsStatus.ECHOUE: set(),
+    SmsStatus.ANNULE: set(),
+}
+
+CANCELLABLE_STATUSES = {SmsStatus.EN_ATTENTE, SmsStatus.PROGRAMME}
+
+
+def sources_of(target: str) -> set[str]:
+    """Statuses from which `target` can be reached."""
+    return {source for source, targets in ALLOWED_TRANSITIONS.items() if target in targets}
+
 
 class Sms(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
