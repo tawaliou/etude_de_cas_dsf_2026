@@ -38,12 +38,23 @@
 
 ## 1. Démarrage
 
+### Démarrage rapide (Linux / macOS)
+
 ```bash
 git clone https://github.com/tawaliou/etude_de_cas_dsf_2026.git && cd etude_de_cas_dsf_2026
+./setup.sh     # crée le venv, installe les dépendances, crée la base SQLite (migrate)
+./run.sh       # démarre l'API et le worker ensemble ; Ctrl+C arrête les deux
+```
+
+`run.sh` lance `setup.sh` s'il n'a pas encore été exécuté. Options : `PORT=8001 ./run.sh`, `GATEWAY_FAKE_NOW=2026-11-04T23:30 ./run.sh` (heure simulée, voir [section 5](#5-tester-la-plage-horaire-sans-attendre-la-nuit)). Si `python3` n'est pas en 3.10+ : `PYTHON=python3.12 ./setup.sh`.
+
+### Démarrage manuel (toutes plateformes, dont Windows)
+
+```bash
 python3 -m venv .venv
 source .venv/bin/activate            # Windows : .venv\Scripts\activate
 pip install -r requirements.txt
-python manage.py migrate
+python manage.py migrate             # crée db.sqlite3 et ses tables
 ```
 
 L'application tourne en **deux processus** (deux terminaux, venv activé dans chacun) :
@@ -56,7 +67,9 @@ python manage.py runserver
 python manage.py worker
 ```
 
-Puis ouvrir **http://127.0.0.1:8000/api/docs** (Swagger) :
+### Utiliser l'API
+
+Ouvrir **http://127.0.0.1:8000/api/docs** (Swagger) :
 
 1. cliquer sur **Authorize** et coller une clé d'API (ci-dessous) ;
 2. sur un endpoint : **Try it out** puis **Execute**.
@@ -254,6 +267,8 @@ GATEWAY_FAKE_NOW=2026-11-05T06:59:40 python manage.py runserver
 # Terminal 2
 GATEWAY_FAKE_NOW=2026-11-05T06:59:40 python manage.py worker
 ```
+
+Ou, en une commande : `GATEWAY_FAKE_NOW=2026-11-05T06:59:40 ./run.sh` (la variable est transmise aux deux processus).
 
 1. Soumettre un SMS `INFO` → statut `PROGRAMME`, `next_attempt_at` = `2026-11-05T07:00:00+01:00`, historique `DIFFERE`.
 2. Soumettre un SMS `OTP` → part immédiatement.
