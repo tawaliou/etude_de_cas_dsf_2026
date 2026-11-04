@@ -21,6 +21,12 @@ class GatewayError(APIException):
         self.details = details
 
 
+class InvalidInput(GatewayError):
+    status_code = status.HTTP_400_BAD_REQUEST
+    default_code = "validation_error"
+    default_detail = "Données invalides."
+
+
 class NotFound(GatewayError):
     status_code = status.HTTP_404_NOT_FOUND
     default_code = "not_found"
