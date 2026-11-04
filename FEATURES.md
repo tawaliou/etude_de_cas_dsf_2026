@@ -2,7 +2,7 @@
 
 ## Socle obligatoire
 
-- [ ] 0. Scaffold : Django + DRF + Swagger, apps clientes en config, authentification par clé d'API
+- [x] 0. Scaffold : Django + DRF + Swagger, apps clientes en config, authentification par clé d'API
 - [ ] 1. Soumettre un SMS, avec validité, segments et opérateur
 - [ ] 2. Consulter un SMS, consommation du jour, annuler
 - [ ] 3. Transmettre et simuler les opérateurs, avec comptes rendus signés, retries et cycle de vie
