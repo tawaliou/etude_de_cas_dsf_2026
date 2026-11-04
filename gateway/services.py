@@ -10,7 +10,7 @@ from django.db.models import Sum
 from . import clock, domain
 from .api.exceptions import Conflict, InvalidInput, NotFound, QuotaExceeded
 from .auth import ClientApp
-from .models import CANCELLABLE_STATUSES, Sms, SmsEvent, SmsStatus, sources_of
+from .models import CANCELLABLE_STATUSES, Campaign, Category, Sms, SmsEvent, SmsStatus, sources_of
 
 logger = logging.getLogger("gateway")
 
@@ -112,52 +112,155 @@ def submit_sms(
             existing = Sms.objects.filter(app_code=app.code, reference=reference).first()
             if existing is not None:
                 return _replay(existing, fingerprint), False
-
-            try:
-                operator = domain.detect_operator(to)
-                segments = domain.check_segments(text)
-            except domain.InvalidSms as exc:
-                raise InvalidInput(exc.message, details={exc.field: [exc.message]}) from exc
-
             now = clock.now()
-            today = clock.local_date(now)
-            used = used_segments(app.code, today)
-            if used + segments > app.daily_quota:
-                raise QuotaExceeded(
-                    f"Quota journalier dépassé : {used}/{app.daily_quota} segments utilisés, "
-                    f"ce SMS en demande {segments}.",
-                    details={"used": used, "quota": app.daily_quota, "requested": segments},
-                )
-
-            requested_at = send_at if send_at is not None and send_at > now else now
-            send_time = domain.earliest_send_time(category, requested_at)
-            deferred = send_time > now  # scheduled by the app and/or outside the INFO window
-            sms = Sms.objects.create(
-                app_code=app.code,
-                reference=reference,
-                to=to,
-                operator=operator,
-                category=category,
-                text=text,
-                content_hash=fingerprint,
-                segments=segments,
-                status=SmsStatus.PROGRAMME if deferred else SmsStatus.EN_ATTENTE,
-                scheduled_at=send_at if requested_at != now else None,
-                next_attempt_at=send_time if deferred else None,
-                quota_day=today,
+            sms = _create_sms(
+                app, to=to, text=text, category=category, reference=reference, send_at=send_at,
+                fingerprint=fingerprint, now=now, used=used_segments(app.code, clock.local_date(now)),
             )
-            if send_time != requested_at:
-                record_event(sms.pk, SmsEvent.Kind.DIFFERE, _deferral_detail(send_time))
     except IntegrityError:
         # Same reference inserted concurrently: behave as an idempotent replay.
         existing = Sms.objects.get(app_code=app.code, reference=reference)
         return _replay(existing, fingerprint), False
+    return sms, True
 
+
+def _create_sms(
+    app: ClientApp,
+    *,
+    to: str,
+    text: str,
+    category: str,
+    reference: str,
+    send_at: datetime | None,
+    fingerprint: str,
+    now: datetime,
+    used: int,
+    campaign: Campaign | None = None,
+) -> Sms:
+    """Validate and store one SMS. Raises InvalidInput or QuotaExceeded (nothing stored).
+
+    `used` is the number of segments already charged to the app today.
+    """
+    try:
+        operator = domain.detect_operator(to)
+        segments = domain.check_segments(text)
+    except domain.InvalidSms as exc:
+        raise InvalidInput(exc.message, details={exc.field: [exc.message]}) from exc
+
+    if used + segments > app.daily_quota:
+        raise QuotaExceeded(
+            f"Quota journalier dépassé : {used}/{app.daily_quota} segments utilisés, "
+            f"ce SMS en demande {segments}.",
+            details={"used": used, "quota": app.daily_quota, "requested": segments},
+        )
+
+    requested_at = send_at if send_at is not None and send_at > now else now
+    send_time = domain.earliest_send_time(category, requested_at)
+    deferred = send_time > now  # scheduled by the app and/or outside the INFO window
+    sms = Sms.objects.create(
+        app_code=app.code,
+        reference=reference,
+        to=to,
+        operator=operator,
+        category=category,
+        text=text,
+        content_hash=fingerprint,
+        segments=segments,
+        status=SmsStatus.PROGRAMME if deferred else SmsStatus.EN_ATTENTE,
+        scheduled_at=send_at if requested_at != now else None,
+        next_attempt_at=send_time if deferred else None,
+        quota_day=clock.local_date(now),
+        campaign=campaign,
+    )
+    if send_time != requested_at:
+        record_event(sms.pk, SmsEvent.Kind.DIFFERE, _deferral_detail(send_time))
     logger.info(
         "sms accepted id=%s app=%s ref=%s category=%s operator=%s segments=%s status=%s",
         sms.id, app.code, reference, category, operator, segments, sms.status,
     )  # never log the text (OTP confidentiality)
-    return sms, True
+    return sms
+
+
+# ---------------------------------------------------------------------------
+# Campaigns
+# ---------------------------------------------------------------------------
+
+
+def submit_campaign(
+    app: ClientApp,
+    *,
+    reference: str,
+    text: str,
+    recipients: list[str],
+    send_at: datetime | None = None,
+) -> tuple[Campaign, bool]:
+    """Send the same INFO text to each recipient, treated one by one.
+
+    A recipient is accepted while the quota allows it, refused afterwards; invalid
+    or duplicated numbers are refused. Returns (campaign, created) like submit_sms.
+    """
+    fingerprint = domain.content_hash(to=",".join(recipients), text=text, category=Category.INFO, send_at=send_at)
+    try:
+        with transaction.atomic():
+            existing = Campaign.objects.filter(app_code=app.code, reference=reference).first()
+            if existing is not None:
+                return _replay(existing, fingerprint), False
+
+            try:  # the text is common to all recipients: an invalid text refuses the campaign
+                domain.check_segments(text)
+            except domain.InvalidSms as exc:
+                raise InvalidInput(exc.message, details={exc.field: [exc.message]}) from exc
+
+            now = clock.now()
+            used = used_segments(app.code, clock.local_date(now))
+            campaign = Campaign.objects.create(
+                app_code=app.code, reference=reference, text=text, content_hash=fingerprint,
+                scheduled_at=send_at if send_at is not None and send_at > now else None,
+                recipients_count=len(recipients), accepted_count=0,
+            )
+            results, seen = [], set()
+            for position, to in enumerate(recipients, start=1):
+                result = {"to": to}
+                try:
+                    if to in seen:
+                        raise InvalidInput("Destinataire en double dans la campagne.", code="duplicate_recipient")
+                    seen.add(to)
+                    sms = _create_sms(
+                        app, to=to, text=text, category=Category.INFO,
+                        reference=f"campagne:{campaign.id}:{position}", send_at=send_at,
+                        fingerprint=domain.content_hash(to=to, text=text, category=Category.INFO, send_at=send_at),
+                        now=now, used=used, campaign=campaign,
+                    )
+                except (InvalidInput, QuotaExceeded) as exc:
+                    result.update(accepted=False, error={"code": exc.get_codes(), "message": str(exc.detail)})
+                else:
+                    used += sms.segments
+                    result.update(accepted=True, sms_id=str(sms.id))
+                results.append(result)
+
+            campaign.results = results
+            campaign.accepted_count = sum(1 for r in results if r["accepted"])
+            campaign.save(update_fields=["results", "accepted_count"])
+    except IntegrityError:
+        existing = Campaign.objects.get(app_code=app.code, reference=reference)
+        return _replay(existing, fingerprint), False
+
+    logger.info(
+        "campaign accepted id=%s app=%s ref=%s accepted=%s/%s",
+        campaign.id, app.code, reference, campaign.accepted_count, campaign.recipients_count,
+    )
+    return campaign, True
+
+
+def get_app_campaign(app: ClientApp, campaign_id) -> Campaign:
+    try:
+        campaign_id = uuid.UUID(str(campaign_id))
+    except ValueError:
+        raise NotFound("Campagne introuvable.", code="campaign_not_found") from None
+    campaign = Campaign.objects.filter(app_code=app.code, pk=campaign_id).first()
+    if campaign is None:
+        raise NotFound("Campagne introuvable.", code="campaign_not_found")
+    return campaign
 
 
 def _deferral_detail(send_time: datetime) -> str:
@@ -178,12 +281,13 @@ def defer_outside_window(sms: Sms, send_time: datetime) -> bool:
     return bool(updated)
 
 
-def _replay(existing: Sms, fingerprint: str) -> Sms:
+def _replay(existing: Sms | Campaign, fingerprint: str):
+    """Same reference again: return the existing object, or refuse if the content differs."""
     if existing.content_hash != fingerprint:
         raise Conflict(
             f"La référence « {existing.reference} » a déjà été utilisée avec un contenu différent.",
             code="reference_conflict",
-            details={"sms_id": str(existing.id)},
+            details={"id": str(existing.id)},
         )
-    logger.info("sms replay id=%s app=%s ref=%s", existing.id, existing.app_code, existing.reference)
+    logger.info("replay %s app=%s ref=%s", existing.id, existing.app_code, existing.reference)
     return existing

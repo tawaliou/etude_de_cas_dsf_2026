@@ -7,7 +7,7 @@
 - [x] 2. Consulter un SMS, consommation du jour, annuler
 - [x] 3. Transmettre et simuler les opérateurs, avec comptes rendus signés, retries et cycle de vie
 - [x] 4. Plage horaire et OTP prioritaires
-- [ ] 5. Campagne
+- [x] 5. Campagne
 
 ## Rendu
 

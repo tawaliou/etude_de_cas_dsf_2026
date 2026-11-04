@@ -45,6 +45,38 @@ def sources_of(target: str) -> set[str]:
     return {source for source, targets in ALLOWED_TRANSITIONS.items() if target in targets}
 
 
+class Campaign(models.Model):
+    """Same INFO text sent to up to 500 recipients; one Sms per accepted recipient."""
+
+    MAX_RECIPIENTS = 500
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    app_code = models.CharField(max_length=32, db_index=True)
+    reference = models.CharField(max_length=100)
+    text = models.TextField()
+    content_hash = models.CharField(max_length=64)
+    scheduled_at = models.DateTimeField(null=True, blank=True)
+    recipients_count = models.PositiveSmallIntegerField()
+    accepted_count = models.PositiveSmallIntegerField()
+    # Result of the submission for each recipient, in the order received:
+    # {"to", "accepted", "sms_id"} or {"to", "accepted": false, "error": {"code", "message"}}
+    results = models.JSONField(default=list)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(fields=["app_code", "reference"], name="uniq_campaign_reference_per_app"),
+        ]
+
+    def __str__(self):
+        return f"Campaign {self.id} [{self.app_code}/{self.reference}] {self.accepted_count}/{self.recipients_count}"
+
+    @property
+    def refused_count(self) -> int:
+        return self.recipients_count - self.accepted_count
+
+
 class Sms(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     app_code = models.CharField(max_length=32, db_index=True)
@@ -59,6 +91,7 @@ class Sms(models.Model):
     scheduled_at = models.DateTimeField(null=True, blank=True)
     # Benin calendar day the segments are charged to (day of submission).
     quota_day = models.DateField()
+    campaign = models.ForeignKey(Campaign, null=True, blank=True, on_delete=models.CASCADE, related_name="sms")
     # Transmission: number of attempts made, when the next one is due (scheduled
     # send or retry), and the id the operator gave to the current attempt.
     attempts = models.PositiveSmallIntegerField(default=0)

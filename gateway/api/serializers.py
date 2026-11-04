@@ -1,6 +1,7 @@
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
-from gateway.models import Category, Sms, SmsEvent, SmsStatus
+from gateway.models import Campaign, Category, Sms, SmsEvent, SmsStatus
 
 
 class SmsFilterSerializer(serializers.Serializer):
@@ -76,3 +77,75 @@ class ReportOutcomeSerializer(serializers.Serializer):
     sms_id = serializers.CharField()
     sms_status = serializers.CharField()
     detail = serializers.CharField()
+
+
+class CampaignCreateSerializer(serializers.Serializer):
+    reference = serializers.CharField(max_length=100, help_text="Référence propre à l'application (envoi unique).")
+    text = serializers.CharField(max_length=2000, trim_whitespace=False, help_text="Texte INFO commun.")
+    recipients = serializers.ListField(
+        child=serializers.CharField(max_length=20),
+        min_length=1,
+        max_length=Campaign.MAX_RECIPIENTS,
+        help_text=f"Numéros des destinataires ({Campaign.MAX_RECIPIENTS} au plus).",
+    )
+    send_at = serializers.DateTimeField(required=False, allow_null=True)
+
+
+class RecipientErrorSerializer(serializers.Serializer):
+    code = serializers.CharField()
+    message = serializers.CharField()
+
+
+class RecipientResultSerializer(serializers.Serializer):
+    to = serializers.CharField()
+    accepted = serializers.BooleanField()
+    sms_id = serializers.CharField(required=False, help_text="Si accepté.")
+    status = serializers.CharField(required=False, help_text="Statut actuel du SMS, si accepté.")
+    error = RecipientErrorSerializer(required=False, help_text="Motif du refus, sinon.")
+
+
+class CampaignSerializer(serializers.ModelSerializer):
+    refused_count = serializers.IntegerField(read_only=True)
+    status_summary = serializers.SerializerMethodField(help_text="Nombre de SMS par statut actuel.")
+    results = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Campaign
+        fields = [
+            "id",
+            "reference",
+            "text",
+            "scheduled_at",
+            "recipients_count",
+            "accepted_count",
+            "refused_count",
+            "status_summary",
+            "results",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+    def _current_statuses(self, campaign) -> dict[str, str]:
+        if not hasattr(campaign, "_statuses"):
+            campaign._statuses = {str(pk): status for pk, status in campaign.sms.values_list("pk", "status")}
+        return campaign._statuses
+
+    def get_status_summary(self, campaign) -> dict[str, int]:
+        summary: dict[str, int] = {}
+        for status in self._current_statuses(campaign).values():
+            summary[status] = summary.get(status, 0) + 1
+        return summary
+
+    @extend_schema_field(RecipientResultSerializer(many=True))
+    def get_results(self, campaign) -> list[dict]:
+        statuses = self._current_statuses(campaign)
+        return [
+            {**result, "status": statuses.get(result["sms_id"])} if result.get("accepted") else result
+            for result in campaign.results
+        ]
+
+
+class CampaignListSerializer(CampaignSerializer):
+    class Meta(CampaignSerializer.Meta):
+        fields = [f for f in CampaignSerializer.Meta.fields if f != "results"]
+        read_only_fields = fields

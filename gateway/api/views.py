@@ -8,10 +8,13 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from gateway import reports, services
-from gateway.models import Sms
+from gateway.models import Campaign, Sms
 from gateway.operators import SIGNATURE_HEADER
 
 from .serializers import (
+    CampaignCreateSerializer,
+    CampaignListSerializer,
+    CampaignSerializer,
     OperatorReportSerializer,
     ReportOutcomeSerializer,
     SmsCreateSerializer,
@@ -157,3 +160,54 @@ class OperatorReportView(APIView):
     def post(self, request, operator):
         outcome = reports.handle_report(operator.upper(), request.body, request.headers.get(SIGNATURE_HEADER))
         return Response(asdict(outcome))
+
+
+class CampaignCollectionView(APIView):
+    @extend_schema(
+        tags=["Campagnes"],
+        summary="Lister ses campagnes",
+        parameters=[OpenApiParameter("page", int), OpenApiParameter("page_size", int)],
+        responses={200: CampaignListSerializer(many=True), 401: UNAUTHORIZED},
+    )
+    def get(self, request):
+        paginator = SmsPagination()
+        page = paginator.paginate_queryset(Campaign.objects.filter(app_code=request.user.code), request, view=self)
+        return paginator.get_paginated_response(CampaignListSerializer(page, many=True).data)
+
+    @extend_schema(
+        tags=["Campagnes"],
+        summary="Soumettre une campagne",
+        description=(
+            "Même texte INFO envoyé à 500 destinataires au plus. Chaque destinataire est traité "
+            "séparément : accepté tant que le quota le permet, refusé ensuite ; un numéro invalide ou en "
+            "double est refusé. La réponse donne le résultat de chaque destinataire. Plage horaire des "
+            "INFO appliquée. Même `reference` + même contenu : campagne existante (200) ; contenu "
+            "différent : 409."
+        ),
+        request=CampaignCreateSerializer,
+        responses={
+            201: CampaignSerializer,
+            200: OpenApiResponse(CampaignSerializer, description="Référence déjà soumise avec le même contenu."),
+            400: OpenApiResponse(description="Données invalides (texte, liste vide ou > 500)."),
+            401: UNAUTHORIZED,
+            409: OpenApiResponse(description="Référence déjà utilisée avec un contenu différent."),
+        },
+    )
+    def post(self, request):
+        payload = CampaignCreateSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        campaign, created = services.submit_campaign(request.user, **payload.validated_data)
+        return Response(
+            CampaignSerializer(campaign).data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK
+        )
+
+
+class CampaignDetailView(APIView):
+    @extend_schema(
+        tags=["Campagnes"],
+        summary="Consulter une campagne",
+        description="Résultat par destinataire avec le statut actuel de chaque SMS, et décompte par statut.",
+        responses={200: CampaignSerializer, 401: UNAUTHORIZED, 404: OpenApiResponse(description="Campagne introuvable.")},
+    )
+    def get(self, request, campaign_id):
+        return Response(CampaignSerializer(services.get_app_campaign(request.user, campaign_id)).data)
